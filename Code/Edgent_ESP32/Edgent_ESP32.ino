@@ -33,7 +33,9 @@ Adafruit_MPU6050 mpu;
 double AngleX;
 double AngleY;
 double AngleZ;
-int32_t lastMillis;
+int32_t lastMillisSample;
+int32_t lastMillisFast;
+int32_t lastMillisSlow;
 double cycleRate;
 double sampleRate;
 double timeConstant;
@@ -96,7 +98,9 @@ void setup()
   mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
   mpu.setGyroRange(MPU6050_RANGE_500_DEG);
   mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
-  lastMillis = 0;
+  lastMillisSample = 0;
+  lastMillisFast = 0;
+  lastMillisSlow = 0;
   sampleRate = 100; // in ms
   AngleX = 0;
   AngleY = 0;
@@ -111,41 +115,33 @@ void setup()
 void loop() {
   BlynkEdgent.run();
 
-  if (millis() - lastMillis > sampleRate) {
+  //Sampling
+  if (millis() - lastMillisSample > sampleRate) {
     sensors_event_t a, g, temp;
     mpu.getEvent(&a, &g, &temp);
     temperature = temp.temperature;
-    Serial.print("Temperature: ");
-    Serial.print(temp.temperature);
-    Serial.println(" degC");
 
     double AGx, AGy, AGz;
     AGx = AngleX + RAD_TO_DEG * g.gyro.x * sampleRate / 1000;
     AGy = AngleY - RAD_TO_DEG * g.gyro.y * sampleRate / 1000;
     AGz = AngleZ + RAD_TO_DEG * g.gyro.z * sampleRate / 1000;
 
-    Serial.print("Gyro X: ");
-    Serial.print(g.gyro.x);
-    Serial.print(", Y: ");
-    Serial.print(g.gyro.y);
-    Serial.print(", Z: ");
-    Serial.print(g.gyro.z);
-    Serial.println(" rad");
     double AAccx, AAccy, AAccz;
     AAccx = RAD_TO_DEG * (atan2(-a.acceleration.y, -a.acceleration.z));
     AAccy = RAD_TO_DEG * (atan2(-a.acceleration.x, -a.acceleration.z));
     AAccz = RAD_TO_DEG * (atan2(-a.acceleration.y, -a.acceleration.x));
-    Serial.print("Acc angle X: ");
-    Serial.print(AAccx);
-    Serial.print(", Y: ");
-    Serial.print(AAccy);
-    Serial.print(", Z: ");
-    Serial.print(AAccz);
-    Serial.println(" deg");
 
     AngleX = alpha * AGx + (1 - alpha) * AAccx;
     AngleY = alpha * AGy + (1 - alpha) * AAccy;
     AngleZ = alpha * AGz + (1 - alpha) * AAccz;
+
+  lastMillisSample = millis();
+  }
+
+  //Reporting data to blynk and serial
+  if (millis() - lastMillisFast > 500) {//augmenter delay quand c'est controllé
+    Blynk.virtualWrite(V2, AngleY);
+
     Serial.print("Comp angle X: ");
     Serial.print(AngleX);
     Serial.print(", Y: ");
@@ -153,12 +149,27 @@ void loop() {
     Serial.print(", Z: ");
     Serial.print(AngleZ);
     Serial.println(" deg");
-    
+    Serial.print("millis : ");
+    Serial.println(millis());
+    Serial.print("delta millis : ");
+    Serial.println(millis() - lastMillisFast);
+
+  lastMillisFast = millis();
   }
-  if (millis() - lastMillis > 500) {//augmenter delay quand c'est controllé
-    Blynk.virtualWrite(V2, AngleY);
-  }
-  if (millis() - lastMillis > 2000) {
+
+  //Reporting data that doesn't need to be reported fast
+  if (millis() - lastMillisSlow > 2000) {
     Blynk.virtualWrite(V6, temperature);
+
+    Serial.print("Temperature: ");
+    Serial.print(temperature);
+    Serial.println(" degC");
+    Serial.print("millis : ");
+    Serial.println(millis());
+    Serial.print("delta millis : ");
+    Serial.println(millis() - lastMillisSlow);
+    
+    lastMillisSlow = millis();
+
   }
 }
