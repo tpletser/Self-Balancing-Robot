@@ -1,4 +1,3 @@
-
 // Fill-in information from your Blynk Template here
 #define BLYNK_TEMPLATE_ID "TMPL_NhPakMf"
 #define BLYNK_DEVICE_NAME "Balancing Robot"
@@ -36,11 +35,25 @@ double AngleZ;
 int32_t lastMillisSample;
 int32_t lastMillisFast;
 int32_t lastMillisSlow;
+int32_t lastMillisPID;
 double cycleRate;
 double sampleRate;
+double PIDRate;
 double timeConstant;
 double alpha;
 double temperature;
+
+#include "ArduPID.h"
+
+ArduPID myController;
+
+double setpoint = 0;
+double input;
+double output;
+double P = 1;
+double I = 0;
+double D = 0;
+int PIDON;
 
 BLYNK_WRITE(V0)
 {
@@ -58,8 +71,8 @@ BLYNK_WRITE(V0)
     digitalWrite(m2pin1, LOW);
     digitalWrite(m2pin2, HIGH);
   }
-  analogWrite(m1PWM, abs(LeftMotor));
-  analogWrite(m2PWM, abs(LeftMotor));
+  //analogWrite(m1PWM, abs(LeftMotor));
+  //analogWrite(m2PWM, abs(LeftMotor));
 }
 
 BLYNK_WRITE(V1)
@@ -69,6 +82,38 @@ BLYNK_WRITE(V1)
   Serial.print("Blynk.Cloud is writing something to V1  : ");
   Serial.println(test);
 }
+
+BLYNK_WRITE(V9)
+{
+  PIDON = param.asInt();
+  if (PIDON) {
+    myController.start();
+  }
+  else {
+    myController.stop();
+  }
+}
+
+
+BLYNK_WRITE(V3)
+{
+  double PChange = param.asDouble();
+  P = PChange;
+  myController.setCoefficients(PChange, I, D);
+}
+BLYNK_WRITE(V4)
+{
+  double DChange = param.asDouble();
+  D = DChange;
+  myController.setCoefficients(P, I, DChange);
+}
+BLYNK_WRITE(V5)
+{
+  double IChange = param.asDouble();
+  I = IChange;
+  myController.setCoefficients(P, IChange, D);
+}
+
 
 void setup()
 {
@@ -108,8 +153,15 @@ void setup()
   timeConstant = 1;
   alpha = timeConstant / (timeConstant + sampleRate / 1000) ;
 
+  myController.begin(&input, &output, &setpoint, P, I, D);
+  myController.setOutputLimits( -255, 255);
+  myController.stop();
+  PIDRate = 100;//ms
 
   BlynkEdgent.begin();
+
+
+  //Add store values to EEPROM and read them when boot and update blynk
 }
 
 void loop() {
@@ -135,40 +187,79 @@ void loop() {
     AngleY = alpha * AGy + (1 - alpha) * AAccy;
     AngleZ = alpha * AGz + (1 - alpha) * AAccz;
 
-  lastMillisSample = millis();
+    lastMillisSample = millis();
   }
+  //PID computing
+  if (millis() - lastMillisPID > PIDRate) {
+    input = AngleY;
 
+    myController.compute();
+
+    /*myController.debug(&Serial, "myController", PRINT_INPUT    | // Can include or comment out any of these terms to print
+                                              PRINT_OUTPUT   | // in the Serial plotter
+                                              PRINT_SETPOINT |
+                                              PRINT_BIAS     );
+    */
+    if (PIDON) {
+      if (output > 0) {
+        digitalWrite(m1pin1, HIGH);
+        digitalWrite(m1pin2, LOW);
+        digitalWrite(m2pin1, HIGH);
+        digitalWrite(m2pin2, LOW);
+      }
+      else {
+        digitalWrite(m1pin1, LOW);
+        digitalWrite(m1pin2, HIGH);
+        digitalWrite(m2pin1, LOW);
+        digitalWrite(m2pin2, HIGH);
+      }
+      analogWrite(m1PWM, abs(output));
+      analogWrite(m2PWM, abs(output));
+    }
+    else {
+
+      digitalWrite(m1pin1, LOW);
+      digitalWrite(m1pin2, LOW);
+      digitalWrite(m2pin1, LOW);
+      digitalWrite(m2pin2, LOW);
+      analogWrite(m1PWM, 0);
+      analogWrite(m2PWM, 0);
+
+    }
+    lastMillisPID = millis();
+  }
   //Reporting data to blynk and serial
   if (millis() - lastMillisFast > 500) {//augmenter delay quand c'est controllé
     Blynk.virtualWrite(V2, AngleY);
 
-    Serial.print("Comp angle X: ");
-    Serial.print(AngleX);
-    Serial.print(", Y: ");
-    Serial.print(AngleY);
-    Serial.print(", Z: ");
-    Serial.print(AngleZ);
-    Serial.println(" deg");
-    Serial.print("millis : ");
-    Serial.println(millis());
-    Serial.print("delta millis : ");
-    Serial.println(millis() - lastMillisFast);
+    /*
+      Serial.print("Comp angle X: ");
+      Serial.print(AngleX);
+      Serial.print(", Y: ");
+      Serial.print(AngleY);
+      Serial.print(", Z: ");
+      Serial.print(AngleZ);
+      Serial.println(" deg");
+      Serial.print("millis : ");
+      Serial.println(millis());
+      Serial.print("delta millis : ");
+      Serial.println(millis() - lastMillisFast);*/
 
-  lastMillisFast = millis();
+    lastMillisFast = millis();
   }
 
   //Reporting data that doesn't need to be reported fast
   if (millis() - lastMillisSlow > 2000) {
     Blynk.virtualWrite(V6, temperature);
+    /*
+        Serial.print("Temperature: ");
+        Serial.print(temperature);
+        Serial.println(" degC");
+        Serial.print("millis : ");
+        Serial.println(millis());
+        Serial.print("delta millis : ");
+        Serial.println(millis() - lastMillisSlow);*/
 
-    Serial.print("Temperature: ");
-    Serial.print(temperature);
-    Serial.println(" degC");
-    Serial.print("millis : ");
-    Serial.println(millis());
-    Serial.print("delta millis : ");
-    Serial.println(millis() - lastMillisSlow);
-    
     lastMillisSlow = millis();
 
   }
